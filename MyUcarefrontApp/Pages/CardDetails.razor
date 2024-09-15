@@ -1,0 +1,187 @@
+@page "/card/{Id:int}"
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+@using UcareAppFront.DTOs
+
+<PageTitle>Card Details</PageTitle>
+
+<div class="container mt-4">
+    <a class="btn btn-light mb-4 border-0" style="background-color: transparent;" @onclick="GoBack">
+        <i class="bi bi-arrow-bar-left"></i> Back
+    </a>
+    <div class="row">
+        <div class="col-md-6">
+            @if (card != null)
+            {
+                <div class="card">
+                    <img src="@card.ImgPath" class="card-img-top img-custom" alt="@card.Name" />
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h4 class="card-title">@card.Name</h4>
+                            <div>
+                            <button class="btn @favoriteButtonClass" style="margin-right: 2px;" @onclick="ToggleFavorite">
+                                <i class="bi @favoriteIcon"></i>
+                            </button>
+                             @if(isUsersCard){
+                               <button class="btn" style="border-color: #40534C; color:#40534C; margin-right: 2px;" @onclick="UpdateCart">
+                                <i class="bi bi-pencil-fill"></i>
+                               </button>
+                            }
+                            @if(isAdmin || isUsersCard){
+                               <button class="btn" style="border-color: red; color: red; margin-right: 2px;" @onclick="DeleteCart">
+                                <i class="bi bi-trash-fill"></i>
+                               </button>
+                            }
+                           
+                            </div>
+                        </div>
+                        <p class="card-text"><i class="bi bi-house-door"></i> @card.Address</p>
+                        <p class="card-text"><i class="bi bi-briefcase"></i> @card.Occupation</p>
+                        <div style="max-height: 3.5em; display: flex; flex-direction: row; gap: 4px;">
+                        <i class="bi bi-file-text"></i> 
+                        <div style="overflow-y: auto; max-height: 3em;">
+                             @card.Description
+                         </div>
+                         </div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <p>Loading...</p>
+            }
+        </div>
+        <div class="col-md-6">
+            <div id="map" style="height: 100%;"></div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+    private CardDto card;
+    private bool isFavorite;
+    private bool isUsersCard;
+    private bool isAdmin =false;
+    private string favoriteButtonClass = "btn-outline-primary";
+    private string favoriteIcon = "bi-heart";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var role = await JSRuntime.InvokeAsync<string>("localStorageHelper.getItem", "role");
+        if(role=="admin" ){
+            isAdmin = true;
+        }
+        try
+        {
+            var response = await Http.GetFromJsonAsync<CardDto>($"http://localhost:5026/api/Card/{Id}");
+
+            if (response != null)
+            {
+                card = response;
+
+
+                var favorites = await GetFavoriteCards();
+                isFavorite = favorites.Contains(card.Id);
+                var email = await JSRuntime.InvokeAsync<string>("localStorageHelper.getItem", "email");
+
+                if(email == card.UserEmail){
+                    isUsersCard = true;
+                }
+                UpdateFavoriteButton();
+            }
+            else
+            {
+
+                Console.WriteLine($"Card with Id {Id} not found.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error fetching card data: {ex.Message}");
+        }
+    }
+
+    private async Task ToggleFavorite()
+    {
+        var favorites = await GetFavoriteCards();
+        if (isFavorite)
+        {
+            favorites.Remove(card.Id);
+        }
+        else
+        {
+            favorites.Add(card.Id);
+        }
+        await SaveFavoriteCards(favorites);
+        isFavorite = !isFavorite;
+        UpdateFavoriteButton();
+    }
+
+    private async Task<List<int>> GetFavoriteCards()
+    {
+        var favoritesJson = await JSRuntime.InvokeAsync<string>("localStorageHelper.getItem", "favorites");
+        return string.IsNullOrEmpty(favoritesJson) ? new List<int>() : System.Text.Json.JsonSerializer.Deserialize<List<int>>(favoritesJson);
+    }
+
+    private async Task SaveFavoriteCards(List<int> favorites)
+    {
+        var favoritesJson = System.Text.Json.JsonSerializer.Serialize(favorites);
+        await JSRuntime.InvokeVoidAsync("localStorageHelper.setItem", "favorites", favoritesJson);
+    }
+
+    private void UpdateFavoriteButton()
+    {
+        favoriteButtonClass = isFavorite ? "btn-primary" : "btn-outline-primary";
+        favoriteIcon = isFavorite ? "bi-heart-fill" : "bi-heart";
+    }
+    private async Task DeleteCart()
+    {
+        var itemId = Id; 
+        try
+        {
+            var response = await Http.DeleteAsync($"http://localhost:5026/api/Card/{itemId}");
+
+            if (response.IsSuccessStatusCode)
+            {
+               @* await JSRuntime.InvokeVoidAsync("showAlert", "Card successfully deleted!"); *@
+               NavigationManager.NavigateTo($"/cards");         
+            }
+            else
+            {
+                Console.WriteLine($"Failed to delete item {itemId}. Status code: {response.StatusCode}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error deleting item {itemId}: {ex.Message}");
+        }
+      
+    }
+    private void UpdateCart(){
+
+        NavigationManager.NavigateTo($"/update-place/{Id}");
+    }
+
+    private async Task GoBack()
+    {
+        var gotoo = await JSRuntime.InvokeAsync<string>("localStorageHelper.getItem", "from");
+        NavigationManager.NavigateTo($"/{gotoo}");
+ 
+
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+            try{
+                await JSRuntime.InvokeVoidAsync("initializeMap", card.Latitude, card.Longitude, card.Name);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error initializing map: {ex.Message}");
+            }
+    }
+}
